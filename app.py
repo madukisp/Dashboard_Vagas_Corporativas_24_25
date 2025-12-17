@@ -2,22 +2,19 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Configuração da página
+# ================= CONFIGURAÇÃO DA PÁGINA =================
 st.set_page_config(
     page_title="Dashboard Contratações Corporativo",
     page_icon="📊",
     layout="wide"
 )
 
-# CSS customizado para os filtros
+# CSS simples
 st.markdown("""
     <style>
-    /* Mudar cor dos badges dos multiselect */
     .stMultiSelect [data-baseweb="tag"] {
         background-color: #3b82f6 !important;
     }
-    
-    /* Ajustar texto dos badges */
     .stMultiSelect [data-baseweb="tag"] span {
         color: white !important;
     }
@@ -27,243 +24,224 @@ st.markdown("""
 st.title("📊 Dashboard de Contratações - Corporativo 2024/2025")
 st.markdown("---")
 
+# ================= LOAD DADOS =================
 @st.cache_data
 def load_data():
     df = pd.read_excel("corporativo.xlsx")
 
-    # Padronizar nomes de colunas
-    df.columns = df.columns.str.strip()
+    # Padronizar nomes das colunas
+    df.columns = (
+        df.columns
+        .str.strip()
+        .str.upper()
+        .str.normalize("NFKD")
+        .str.encode("ascii", errors="ignore")
+        .str.decode("utf-8")
+    )
 
-    # Converter datas
+    # Conversão de datas
     date_columns = [
-        'DATA ABERTURA DA VAGA',
-        'DATA DE FECHAMENTO VAGA EM SELEÇÃO',
-        'DATA DE INÍCIO SUBSTITUIÇÃO',
-        'DATA PREFERENCIAL PARA CONTRATAÇÃO'
+        "DATA ABERTURA DA VAGA",
+        "DATA DE FECHAMENTO VAGA EM SELECAO",
+        "DATA DE INICIO SUBSTITUICAO",
+        "DATA PREFERENCIAL PARA CONTRATACAO"
     ]
 
     for col in date_columns:
         if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors='coerce')
+            df[col] = pd.to_datetime(
+                df[col],
+                dayfirst=True,
+                errors="coerce"
+            )
 
-    # Classificação
+    # Classificação da contratação
     def classificar_contratacao(row):
-        motivo = str(row.get('MOTIVO DO DESLIGAMENTO', '')).upper()
-        nome = str(row.get('NOME - COLABORADOR', '')).upper()
+        motivo = str(row.get("MOTIVO DO DESLIGAMENTO", "")).upper()
+        nome = str(row.get("NOME - COLABORADOR", "")).upper()
 
-        if 'PROMOÇÃO' in motivo or 'PROMOCAO' in motivo or 'PROMOÇÃO' in nome or 'PROMOCAO' in nome:
-            return 'Promoção'
-        elif 'AUMENTO DE QUADRO' in motivo or 'AUMENTO DE QUADRO' in nome:
-            return 'Vaga Nova'
+        if "PROMOCAO" in motivo or "PROMOCAO" in nome:
+            return "Promoção"
+        elif "AUMENTO DE QUADRO" in motivo or "AUMENTO DE QUADRO" in nome:
+            return "Vaga Nova"
         else:
-            return 'Substituição'
+            return "Substituição"
 
-    df['Tipo de Contratação'] = df.apply(classificar_contratacao, axis=1)
+    df["TIPO DE CONTRATACAO"] = df.apply(classificar_contratacao, axis=1)
 
-    # Filtrar apenas 2024 e 2025
-    if 'Ano' in df.columns:
-        df = df[df['Ano'].isin([2024, 2025])]
+    # Filtrar anos
+    if "ANO" in df.columns:
+        df = df[df["ANO"].isin([2024, 2025])]
+
+    # Validação mínima
+    obrigatorias = ["ANO", "MES", "FUNCAO", "SUPERINTENDENCIA", "TIPO DE CONTRATACAO"]
+    for col in obrigatorias:
+        if col not in df.columns:
+            raise ValueError(f"Coluna obrigatória ausente: {col}")
 
     return df
 
 
+# ================= EXECUÇÃO =================
 try:
     df = load_data()
 
+    # -------- FILTROS --------
     st.sidebar.header("🔍 Filtros")
 
-    anos_selecionados = st.sidebar.multiselect(
+    anos_sel = st.sidebar.multiselect(
         "Ano",
-        sorted(df['Ano'].dropna().unique()),
-        default=sorted(df['Ano'].dropna().unique())
+        sorted(df["ANO"].unique()),
+        default=sorted(df["ANO"].unique())
     )
 
-    tipos_selecionados = st.sidebar.multiselect(
+    tipos_sel = st.sidebar.multiselect(
         "Tipo de Contratação",
-        df['Tipo de Contratação'].unique(),
-        default=df['Tipo de Contratação'].unique()
+        df["TIPO DE CONTRATACAO"].unique(),
+        default=df["TIPO DE CONTRATACAO"].unique()
     )
 
     df_filtrado = df[
-        (df['Ano'].isin(anos_selecionados)) &
-        (df['Tipo de Contratação'].isin(tipos_selecionados))
+        (df["ANO"].isin(anos_sel)) &
+        (df["TIPO DE CONTRATACAO"].isin(tipos_sel))
     ]
 
-    # KPIs
+    # -------- KPIs --------
     col1, col2, col3, col4 = st.columns(4)
 
     col1.metric("Total", len(df_filtrado))
-    col2.metric("Vagas Novas", (df_filtrado['Tipo de Contratação'] == 'Vaga Nova').sum())
-    col3.metric("Promoções", (df_filtrado['Tipo de Contratação'] == 'Promoção').sum())
-    col4.metric("Substituições", (df_filtrado['Tipo de Contratação'] == 'Substituição').sum())
+    col2.metric("Vagas Novas", (df_filtrado["TIPO DE CONTRATACAO"] == "Vaga Nova").sum())
+    col3.metric("Promoções", (df_filtrado["TIPO DE CONTRATACAO"] == "Promoção").sum())
+    col4.metric("Substituições", (df_filtrado["TIPO DE CONTRATACAO"] == "Substituição").sum())
 
     st.markdown("---")
 
-    # Paleta de tons de azul em degradê
-    color_palette = ['#1e3a8a', '#3b82f6', '#60a5fa']
+    palette = ["#1e3a8a", "#3b82f6", "#60a5fa"]
 
-    # Gráficos
+    # -------- GRÁFICOS PRINCIPAIS --------
     col1, col2 = st.columns(2)
 
     with col1:
-        pizza = df_filtrado['Tipo de Contratação'].value_counts().reset_index()
-        pizza.columns = ['Tipo', 'Quantidade']
-        fig = px.pie(
-            pizza, 
-            values='Quantidade', 
-            names='Tipo', 
-            hole=0.4,
-            color_discrete_sequence=color_palette
+        pizza = (
+            df_filtrado
+            .groupby("TIPO DE CONTRATACAO")
+            .size()
+            .reset_index(name="Quantidade")
         )
-        fig.update_traces(textposition='inside', textinfo='percent+label')
-        fig.update_layout(
-            showlegend=True,
-            font=dict(size=12),
-            margin=dict(t=30, b=30)
+
+        fig = px.pie(
+            pizza,
+            values="Quantidade",
+            names="TIPO DE CONTRATACAO",
+            hole=0.4,
+            color_discrete_sequence=palette
         )
         st.plotly_chart(fig, use_container_width=True)
 
     with col2:
         ano_tipo = (
             df_filtrado
-            .groupby(['Ano', 'Tipo de Contratação'])
+            .groupby(["ANO", "TIPO DE CONTRATACAO"])
             .size()
-            .reset_index(name='Quantidade')
+            .reset_index(name="Quantidade")
         )
+
         fig = px.bar(
             ano_tipo,
-            x='Ano',
-            y='Quantidade',
-            color='Tipo de Contratação',
-            barmode='group',
-            color_discrete_sequence=color_palette
-        )
-        fig.update_layout(
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(size=12),
-            margin=dict(t=30, b=30),
-            xaxis=dict(showgrid=False),
-            yaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)')
+            x="ANO",
+            y="Quantidade",
+            color="TIPO DE CONTRATACAO",
+            barmode="group",
+            color_discrete_sequence=palette
         )
         st.plotly_chart(fig, use_container_width=True)
 
-    # 🔹 VAGAS POR SUPERINTENDÊNCIA
+    # -------- VAGAS POR SUPERINTENDÊNCIA --------
     st.markdown("---")
     st.subheader("🏢 Vagas por Superintendência")
 
     sup_chart = (
         df_filtrado
-        .groupby('SUPERINTENDENCIA')
+        .groupby("SUPERINTENDENCIA")
         .size()
-        .reset_index(name='Quantidade')
-        .sort_values('Quantidade', ascending=False)
+        .reset_index(name="Quantidade")
+        .sort_values("Quantidade", ascending=False)
     )
 
     fig = px.bar(
         sup_chart,
-        x='Quantidade',
-        y='SUPERINTENDENCIA',
-        orientation='h',
-        color='Quantidade',
-        color_continuous_scale=['#dbeafe', '#3b82f6', '#1e3a8a']
+        x="Quantidade",
+        y="SUPERINTENDENCIA",
+        orientation="h"
     )
-    fig.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(size=12),
-        margin=dict(t=30, b=30),
-        xaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)'),
-        yaxis=dict(categoryorder='total ascending', showgrid=False),
-        showlegend=False
-    )
-    fig.update_coloraxes(showscale=False)
+    fig.update_layout(yaxis={"categoryorder": "total ascending"})
     st.plotly_chart(fig, use_container_width=True)
 
-    # 🔹 FUNÇÕES POR SUPERINTENDÊNCIA (TABELA)
+    # -------- FUNÇÕES POR SUPERINTENDÊNCIA --------
     st.markdown("---")
     st.subheader("📋 Funções por Superintendência")
 
     tabela_funcoes = (
         df_filtrado
-        .groupby(['SUPERINTENDENCIA', 'FUNÇÃO'])
+        .groupby(["SUPERINTENDENCIA", "FUNCAO"])
         .size()
-        .reset_index(name='Quantidade')
-        .sort_values(['SUPERINTENDENCIA', 'Quantidade'], ascending=[True, False])
+        .reset_index(name="Quantidade")
+        .sort_values(["SUPERINTENDENCIA", "Quantidade"], ascending=[True, False])
     )
 
-    st.dataframe(
-        tabela_funcoes,
-        use_container_width=True
-    )
+    st.dataframe(tabela_funcoes, use_container_width=True)
 
-
-    # Timeline
+    # -------- TIMELINE --------
     st.markdown("---")
     st.subheader("📅 Timeline de Contratações por Mês")
 
-    df_filtrado['Ano-Mês'] = (
-        df_filtrado['Ano'].astype(str) + '-' +
-        df_filtrado['Mês'].astype(int).astype(str).str.zfill(2)
+    df_filtrado["ANO_MES"] = (
+        df_filtrado["ANO"].astype(str) + "-" +
+        df_filtrado["MES"].astype(int).astype(str).str.zfill(2)
     )
 
     timeline = (
         df_filtrado
-        .groupby(['Ano-Mês', 'Tipo de Contratação'])
+        .groupby(["ANO_MES", "TIPO DE CONTRATACAO"])
         .size()
-        .reset_index(name='Quantidade')
-        .sort_values('Ano-Mês')
+        .reset_index(name="Quantidade")
+        .sort_values("ANO_MES")
     )
 
     fig = px.line(
         timeline,
-        x='Ano-Mês',
-        y='Quantidade',
-        color='Tipo de Contratação',
+        x="ANO_MES",
+        y="Quantidade",
+        color="TIPO DE CONTRATACAO",
         markers=True,
-        color_discrete_sequence=color_palette
+        color_discrete_sequence=palette
     )
-    fig.update_layout(
-        xaxis_tickangle=-45,
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(size=12),
-        margin=dict(t=30, b=30),
-        xaxis=dict(showgrid=False),
-        yaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)')
-    )
-    fig.update_traces(line=dict(width=3))
+    fig.update_layout(xaxis_tickangle=-45)
     st.plotly_chart(fig, use_container_width=True)
 
-    # Top cargos
+    # -------- TOP CARGOS --------
     st.markdown("---")
     st.subheader("🎯 Top 10 Cargos - Vagas Novas")
 
-    vagas_novas_df = df_filtrado[df_filtrado['Tipo de Contratação'] == 'Vaga Nova']
-    top_cargos = vagas_novas_df['FUNÇÃO'].value_counts().head(10).reset_index()
-    top_cargos.columns = ['Cargo', 'Quantidade']
+    top_cargos = (
+        df_filtrado[df_filtrado["TIPO DE CONTRATACAO"] == "Vaga Nova"]
+        .groupby("FUNCAO")
+        .size()
+        .reset_index(name="Quantidade")
+        .sort_values("Quantidade", ascending=False)
+        .head(10)
+    )
 
     fig = px.bar(
-        top_cargos, 
-        x='Quantidade', 
-        y='Cargo', 
-        orientation='h',
-        color='Quantidade',
-        color_continuous_scale=['#dbeafe', '#3b82f6', '#1e3a8a']
+        top_cargos,
+        x="Quantidade",
+        y="FUNCAO",
+        orientation="h"
     )
-    fig.update_layout(
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(size=12),
-        margin=dict(t=30, b=30),
-        xaxis=dict(showgrid=True, gridcolor='rgba(128,128,128,0.2)'),
-        yaxis=dict(categoryorder='total ascending', showgrid=False),
-        showlegend=False
-    )
-    fig.update_coloraxes(showscale=False)
+    fig.update_layout(yaxis={"categoryorder": "total ascending"})
     st.plotly_chart(fig, use_container_width=True)
 
-    # Tabelas
+    # -------- TABELAS --------
     st.markdown("---")
     st.subheader("📋 Detalhamento das Contratações")
 
@@ -271,24 +249,26 @@ try:
 
     with tab1:
         st.dataframe(
-            df_filtrado[df_filtrado['Tipo de Contratação'] == 'Vaga Nova']
-            [['Ano', 'Mês', 'SUPERINTENDENCIA', 'FUNÇÃO']],
+            df_filtrado[df_filtrado["TIPO DE CONTRATACAO"] == "Vaga Nova"]
+            [["ANO", "MES", "SUPERINTENDENCIA", "FUNCAO"]],
             use_container_width=True
         )
 
     with tab2:
         st.dataframe(
-            df_filtrado[df_filtrado['Tipo de Contratação'] == 'Promoção']
-            [['Ano', 'Mês', 'SUPERINTENDENCIA', 'FUNÇÃO', 'NOME - COLABORADOR']],
+            df_filtrado[df_filtrado["TIPO DE CONTRATACAO"] == "Promoção"]
+            [["ANO", "MES", "SUPERINTENDENCIA", "FUNCAO", "NOME - COLABORADOR"]],
             use_container_width=True
         )
 
     with tab3:
         st.dataframe(
-            df_filtrado[['Ano', 'Mês', 'SUPERINTENDENCIA', 'Tipo de Contratação', 'FUNÇÃO', 'NOME - COLABORADOR']],
+            df_filtrado[
+                ["ANO", "MES", "SUPERINTENDENCIA", "TIPO DE CONTRATACAO", "FUNCAO", "NOME - COLABORADOR"]
+            ],
             use_container_width=True
         )
 
 except Exception as e:
     st.error(f"Erro ao carregar dados: {e}")
-    st.info("Verifique se o arquivo corporativo.xlsx está no repositório.")
+    st.info("Verifique o arquivo corporativo.xlsx e os nomes das colunas.")
