@@ -60,7 +60,7 @@ def load_data():
         motivo = str(row.get("MOTIVO DO DESLIGAMENTO", "")).upper()
         nome = str(row.get("NOME - COLABORADOR", "")).upper()
 
-        if "PROMOCAO" in motivo or "PROMOCAO" in nome:
+        if "PROMOÇÃO" in motivo or "PROMOÇÃO" in nome:
             return "Promoção"
         elif "AUMENTO DE QUADRO" in motivo or "AUMENTO DE QUADRO" in nome:
             return "Vaga Nova"
